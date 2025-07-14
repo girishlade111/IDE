@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Web IDE - Generate Sites with Natural Language</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/editor/editor.main.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color-light: #f3f4f6;
+            --bg-color-dark: #111827;
+            --text-color-light: #1f2937;
+            --text-color-dark: #f9fafb;
+            --border-color-light: #d1d5db;
+            --border-color-dark: #374151;
+            --primary-color: #4f46e5;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            transition: background-color 0.3s, color 0.3s;
+        }
+        .dark {
+            --bg-color: var(--bg-color-dark);
+            --text-color: var(--text-color-dark);
+            --border-color: var(--border-color-dark);
+        }
+        .light {
+            --bg-color: var(--bg-color-light);
+            --text-color: var(--text-color-light);
+            --border-color: var(--border-color-light);
+        }
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+        }
+        .resizable {
+            resize: both;
+            overflow: auto;
+        }
+        .panel {
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            background-color: var(--bg-color);
+            transition: all 0.3s;
+        }
+        .sidebar {
+            transition: width 0.3s ease-in-out;
+        }
+        .sidebar-minimized {
+            width: 4rem; /* 64px */
+        }
+        .prompt-bar-minimized {
+            visibility: hidden;
+            opacity: 0;
+        }
+        .tab-button {
+            transition: all 0.2s;
+        }
+        .tab-button.active {
+            background-color: var(--primary-color);
+            color: white;
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid var(--primary-color);
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .console-log { border-bottom: 1px solid var(--border-color); padding: 4px 8px; }
+        .console-error { color: #ef4444; }
+        .console-success { color: #22c55e; }
+        .console-info { color: #3b82f6; }
+    </style>
+</head>
+<body class="light">
+
+    <div class="flex h-screen w-screen bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200">
+        <!-- Main Content -->
+        <div class="flex-1 flex flex-col p-2 gap-2">
+            <!-- Top Panels -->
+            <div class="flex-1 flex gap-2">
+                <div id="top-left-panel" class="flex-1 flex flex-col panel">
+                    <div class="flex items-center justify-between p-2 border-b border-gray-200 dark:border-gray-700">
+                        <div class="flex items-center gap-2">
+                            <button id="live-preview-tab" class="tab-button px-3 py-1 rounded-md text-sm font-medium active">Live Preview</button>
+                            <button id="code-view-tab" class="tab-button px-3 py-1 rounded-md text-sm font-medium">Code View</button>
+                        </div>
+                        <div class="flex items-center gap-2">
+                             <button id="open-new-tab-btn" class="px-2 py-1 text-xs rounded-md hover:bg-gray-200 dark:hover:bg-gray-700">Open in New Tab</button>
+                        </div>
+                    </div>
+                    <div id="live-preview-content" class="flex-1">
+                        <iframe id="preview-frame" class="w-full h-full border-0"></iframe>
+                    </div>
+                    <div id="code-view-content" class="flex-1 hidden">
+                        <div id="editor" class="w-full h-full"></div>
+                    </div>
+                </div>
+            </div>
+            <!-- Bottom Panels -->
+            <div class="flex h-1/3 gap-2">
+                <div id="bottom-left-panel" class="flex-1 flex flex-col panel">
+                    <div class="flex items-center justify-between p-2 border-b border-gray-200 dark:border-gray-700">
+                        <h2 class="font-semibold text-sm">Terminal</h2>
+                        <button id="toggle-terminal" class="px-2 py-1 text-xs rounded-md hover:bg-gray-200 dark:hover:bg-gray-700">▼</button>
+                    </div>
+                    <div id="terminal-content" class="flex-1 p-2 bg-black text-white font-mono text-sm overflow-y-auto">
+                        <div id="terminal-output"></div>
+                        <div class="flex">
+                            <span class="text-green-400">user@ai-ide:~$</span>
+                            <input type="text" id="terminal-input" class="bg-transparent border-none text-white flex-1 focus:outline-none ml-2">
+                        </div>
+                    </div>
+                </div>
+                <div id="bottom-right-panel" class="flex-1 flex flex-col panel">
+                     <div class="flex items-center justify-between p-2 border-b border-gray-200 dark:border-gray-700">
+                        <h2 class="font-semibold text-sm">Console</h2>
+                        <button id="toggle-console" class="px-2 py-1 text-xs rounded-md hover:bg-gray-200 dark:hover:bg-gray-700">▼</button>
+                    </div>
+                    <div id="console-content" class="flex-1 p-2 overflow-y-auto text-sm"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Sidebar -->
+        <div id="sidebar" class="w-96 bg-white dark:bg-gray-800 p-4 flex flex-col gap-4 border-l border-gray-200 dark:border-gray-700 sidebar">
+            <div class="flex justify-between items-center">
+                <h2 class="text-lg font-bold">AI Prompt</h2>
+                <button id="toggle-sidebar-btn" class="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700">▶</button>
+            </div>
+            
+            <div id="prompt-controls">
+                <!-- Model Selection -->
+                <div>
+                    <label for="model-selector" class="block text-sm font-medium text-gray-700 dark:text-gray-300">AI Model</label>
+                    <select id="model-selector" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 dark:bg-gray-700 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                        <option value="gemini">Gemini (Free)</option>
+                        <option value="deepseek">DeepSeek R1</option>
+                        <option value="qwen">Qwen3 235B A22B</option>
+                    </select>
+                </div>
+
+                <!-- API Keys -->
+                <div id="api-key-inputs" class="mt-4">
+                    <div id="gemini-key-input">
+                        <label for="gemini-api-key" class="block text-sm font-medium">Gemini API Key</label>
+                        <input type="password" id="gemini-api-key" class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 shadow-sm" value="AIzaSyDK68voN4wRnCh95nrlu0m9vHbtJKOECqM">
+                    </div>
+                     <div id="deepseek-key-input" class="hidden">
+                        <label for="deepseek-api-key" class="block text-sm font-medium">DeepSeek API Key</label>
+                        <input type="password" id="deepseek-api-key" class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 shadow-sm" value="sk-c22d625ec2a046b9bed7cb583d615d48">
+                    </div>
+                    <div id="openrouter-key-input" class="hidden">
+                        <label for="openrouter-api-key" class="block text-sm font-medium">OpenRouter API Key</label>
+                        <input type="password" id="openrouter-api-key" class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 shadow-sm" value="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">
+                    </div>
+                </div>
+
+                <!-- Prompt Input -->
+                <div class="mt-4 flex-1 flex flex-col">
+                    <label for="prompt-input" class="block text-sm font-medium">Your Prompt</label>
+                    <textarea id="prompt-input" rows="8" class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 shadow-sm focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="mt-4 flex flex-col gap-2">
+                    <button id="generate-btn" class="w-full bg-indigo-600 text-white px-4 py-2 rounded-md font-semibold hover:bg-indigo-700 flex items-center justify-center gap-2">
+                        <span id="generate-btn-text">Generate</span>
+                        <div id="loader" class="loader hidden"></div>
+                    </button>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button id="copy-code-btn" class="w-full bg-gray-500 text-white px-4 py-2 rounded-md font-semibold hover:bg-gray-600">Copy Code</button>
+                        <button id="format-code-btn" class="w-full bg-gray-500 text-white px-4 py-2 rounded-md font-semibold hover:bg-gray-600">Format Code</button>
+                    </div>
+                    <button id="export-zip-btn" class="w-full bg-green-600 text-white px-4 py-2 rounded-md font-semibold hover:bg-green-700">Export as .zip</button>
+                </div>
+
+                <!-- Theme Toggle -->
+                <div class="mt-auto pt-4 border-t border-gray-200 dark:border-gray-700">
+                     <div class="flex justify-between items-center">
+                        <span class="text-sm font-medium">Dark Mode</span>
+                        <button id="theme-toggle" class="relative inline-flex items-center h-6 rounded-full w-11 transition-colors bg-gray-200 dark:bg-gray-600">
+                            <span class="sr-only">Enable notifications</span>
+                            <span class="inline-block w-4 h-4 transform bg-white rounded-full transition-transform translate-x-1 dark:translate-x-6"></span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- UI Elements ---
+            const generateBtn = document.getElementById('generate-btn');
+            const generateBtnText = document.getElementById('generate-btn-text');
+            const loader = document.getElementById('loader');
+            const promptInput = document.getElementById('prompt-input');
+            const previewFrame = document.getElementById('preview-frame');
+            const modelSelector = document.getElementById('model-selector');
+            const apiKeyInputs = {
+                gemini: document.getElementById('gemini-key-input'),
+                deepseek: document.getElementById('deepseek-key-input'),
+                qwen: document.getElementById('openrouter-key-input')
+            };
+            const apiKeys = {
+                gemini: document.getElementById('gemini-api-key'),
+                deepseek: document.getElementById('deepseek-api-key'),
+                openrouter: document.getElementById('openrouter-api-key')
+            };
+            const consoleContent = document.getElementById('console-content');
+            const terminalOutput = document.getElementById('terminal-output');
+            const terminalInput = document.getElementById('terminal-input');
+
+            // --- Monaco Editor Setup ---
+            let editor;
+            require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs' }});
+            require(['vs/editor/editor.main'], function() {
+                editor = monaco.editor.create(document.getElementById('editor'), {
+                    value: `<!DOCTYPE html>
+<html>
+<head>
+    <title>Welcome!</title>
+    <style>
+        body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #f0f0f0; }
+        h1 { color: #333; }
+    </style>
+</head>
+<body>
+    <h1>Hello, AI IDE!</h1>
+    <p>Use the prompt on the right to generate a website.</p>
+</body>
+</html>`,
+                    language: 'html',
+                    theme: document.body.classList.contains('dark') ? 'vs-dark' : 'vs',
+                    automaticLayout: true,
+                    minimap: { enabled: false }
+                });
+
+                // Update preview on editor change
+                editor.onDidChangeModelContent(() => {
+                    updatePreview();
+                });
+
+                // Call initial preview update *after* editor is initialized
+                updatePreview();
+            });
+
+            // --- Theme Management ---
+            const themeToggle = document.getElementById('theme-toggle');
+            themeToggle.addEventListener('click', () => {
+                document.body.classList.toggle('dark');
+                document.body.classList.toggle('light');
+                const isDark = document.body.classList.contains('dark');
+                localStorage.setItem('theme', isDark ? 'dark' : 'light');
+                // Check if monaco and editor are available before setting theme
+                if (window.monaco && editor) {
+                   monaco.editor.setTheme(isDark ? 'vs-dark' : 'vs');
+                }
+                logToConsole(`Theme changed to ${isDark ? 'dark' : 'light'} mode.`, 'info');
+            });
+
+            if (localStorage.getItem('theme') === 'dark') {
+                document.body.classList.add('dark');
+                document.body.classList.remove('light');
+                themeToggle.querySelector('span:last-child').classList.add('dark:translate-x-6');
+            }
+
+            // --- Logging ---
+            function logToConsole(message, type = 'log') {
+                const logEntry = document.createElement('div');
+                logEntry.className = `console-log console-${type}`;
+                logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+                consoleContent.appendChild(logEntry);
+                consoleContent.scrollTop = consoleContent.scrollHeight;
+            }
+
+            function logToTerminal(message) {
+                const outputEntry = document.createElement('div');
+                outputEntry.textContent = message;
+                terminalOutput.appendChild(outputEntry);
+                terminalOutput.scrollTop = terminalOutput.scrollHeight;
+            }
+            
+            // --- Preview Logic ---
+            function updatePreview() {
+                // Add a guard clause to ensure editor is initialized
+                if (!editor) {
+                    return;
+                }
+                const code = editor.getValue();
+                const blob = new Blob([code], { type: 'text/html' });
+                previewFrame.src = URL.createObjectURL(blob);
+            }
+
+            // --- API & Generation Logic ---
+            generateBtn.addEventListener('click', async () => {
+                const prompt = promptInput.value;
+                const model = modelSelector.value;
+                if (!prompt) {
+                    logToConsole('Prompt cannot be empty.', 'error');
+                    return;
+                }
+
+                setLoading(true);
+                logToConsole(`Generating with ${model}...`, 'info');
+
+                try {
+                    let generatedCode = '';
+                    if (model === 'gemini') {
+                        generatedCode = await generateWithGemini(prompt);
+                    } else {
+                        generatedCode = await generateWithOpenRouter(prompt, model);
+                    }
+                    
+                    // Clean up the response to get only the code
+                    const codeMatch = generatedCode.match(/```html\n([\s\S]*?)\n```/);
+                    const finalCode = codeMatch ? codeMatch[1].trim() : generatedCode.trim();
+
+                    editor.setValue(finalCode);
+                    updatePreview();
+                    logToConsole('Generation successful!', 'success');
+                } catch (error) {
+                    logToConsole(`Error generating code: ${error.message}`, 'error');
+                    console.error(error);
+                } finally {
+                    setLoading(false);
+                }
+            });
+
+            function setLoading(isLoading) {
+                if (isLoading) {
+                    generateBtn.disabled = true;
+                    generateBtnText.classList.add('hidden');
+                    loader.classList.remove('hidden');
+                } else {
+                    generateBtn.disabled = false;
+                    generateBtnText.classList.remove('hidden');
+                    loader.classList.add('hidden');
+                }
+            }
+
+            async function generateWithGemini(prompt) {
+                const apiKey = apiKeys.gemini.value;
+                if (!apiKey) throw new Error("Gemini API Key is missing.");
+
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+                const fullPrompt = `You are an expert web developer. Create a complete, single HTML file with embedded CSS and JavaScript based on the following prompt. The HTML file should be fully functional and responsive. Do not include any explanations, just the raw code inside a single markdown block. Prompt: "${prompt}"`;
+                
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: fullPrompt }] }]
+                    })
+                });
+
+                if (!response.ok) {
+                    // **FIX**: Handle non-JSON error responses gracefully
+                    let errorMsg = `Gemini API error: ${response.status} ${response.statusText}`;
+                    try {
+                        const errorData = await response.json();
+                        errorMsg = `Gemini API error: ${errorData.error.message}`;
+                    } catch (e) {
+                        console.error("Could not parse Gemini error response as JSON.");
+                    }
+                    throw new Error(errorMsg);
+                }
+
+                const data = await response.json();
+                return data.candidates[0].content.parts[0].text;
+            }
+
+            async function generateWithOpenRouter(prompt, model) {
+                const apiKey = apiKeys.openrouter.value;
+                if (!apiKey) throw new Error("OpenRouter API Key is missing.");
+
+                const modelMapping = {
+                    'deepseek': 'deepseek/deepseek-coder',
+                    'qwen': 'qwen/qwen3-235b-a22b:free'
+                };
+                const modelIdentifier = modelMapping[model];
+
+                const url = "https://openrouter.ai/api/v1/chat/completions";
+                const fullPrompt = `You are an expert web developer. Create a complete, single HTML file with embedded CSS and JavaScript based on the following prompt. The HTML file should be fully functional and responsive. Do not include any explanations, just the raw code inside a single markdown block. Prompt: "${prompt}"`;
+
+                const response = await fetch(url, {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${apiKey}`,
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "https://ai-ide.example.com",
+                        "X-Title": "AI Web IDE"
+                    },
+                    body: JSON.stringify({
+                        model: modelIdentifier,
+                        messages: [{ role: "user", content: fullPrompt }]
+                    })
+                });
+
+                if (!response.ok) {
+                    // **FIX**: Handle non-JSON error responses gracefully
+                    let errorMsg = `OpenRouter API error: ${response.status} ${response.statusText}`;
+                    try {
+                        const errorData = await response.json();
+                        errorMsg = `OpenRouter API error: ${errorData.error.message}`;
+                    } catch (e) {
+                        console.error("Could not parse OpenRouter error response as JSON.");
+                    }
+                    throw new Error(errorMsg);
+                }
+
+                const data = await response.json();
+                return data.choices[0].message.content;
+            }
+
+            // --- Model Selector Logic ---
+            modelSelector.addEventListener('change', () => {
+                const selectedModel = modelSelector.value;
+                Object.values(apiKeyInputs).forEach(input => input.classList.add('hidden'));
+                if (apiKeyInputs[selectedModel]) {
+                    apiKeyInputs[selectedModel].classList.remove('hidden');
+                } else if (selectedModel === 'qwen') { // Qwen uses OpenRouter key
+                     apiKeyInputs.qwen.classList.remove('hidden');
+                }
+                logToConsole(`Switched to ${selectedModel} model.`, 'info');
+            });
+            // Trigger change to set initial state
+            modelSelector.dispatchEvent(new Event('change'));
+
+
+            // --- Tabbed Interface ---
+            const livePreviewTab = document.getElementById('live-preview-tab');
+            const codeViewTab = document.getElementById('code-view-tab');
+            const livePreviewContent = document.getElementById('live-preview-content');
+            const codeViewContent = document.getElementById('code-view-content');
+
+            livePreviewTab.addEventListener('click', () => {
+                livePreviewContent.classList.remove('hidden');
+                codeViewContent.classList.add('hidden');
+                livePreviewTab.classList.add('active');
+                codeViewTab.classList.remove('active');
+                updatePreview();
+            });
+
+            codeViewTab.addEventListener('click', () => {
+                livePreviewContent.classList.add('hidden');
+                codeViewContent.classList.remove('hidden');
+                livePreviewTab.classList.remove('active');
+                codeViewTab.classList.add('active');
+                if (editor) editor.layout();
+            });
+            
+            // --- Sidebar Toggle ---
+            const sidebar = document.getElementById('sidebar');
+            const promptControls = document.getElementById('prompt-controls');
+            const toggleSidebarBtn = document.getElementById('toggle-sidebar-btn');
+            toggleSidebarBtn.addEventListener('click', () => {
+                sidebar.classList.toggle('sidebar-minimized');
+                promptControls.classList.toggle('prompt-bar-minimized');
+                if (sidebar.classList.contains('sidebar-minimized')) {
+                    toggleSidebarBtn.innerHTML = '◀';
+                } else {
+                    toggleSidebarBtn.innerHTML = '▶';
+                }
+                // Force editor to recalculate layout
+                setTimeout(() => {
+                    if (editor) editor.layout();
+                }, 300);
+            });
+
+
+            // --- Utility Buttons ---
+            document.getElementById('copy-code-btn').addEventListener('click', () => {
+                if (!editor) return;
+                navigator.clipboard.writeText(editor.getValue()).then(() => {
+                    logToConsole('Code copied to clipboard!', 'success');
+                }, () => {
+                    logToConsole('Failed to copy code.', 'error');
+                });
+            });
+
+            document.getElementById('format-code-btn').addEventListener('click', () => {
+                if (!editor) return;
+                editor.getAction('editor.action.formatDocument').run();
+                logToConsole('Code formatted.', 'info');
+            });
+
+            document.getElementById('export-zip-btn').addEventListener('click', () => {
+                if (!editor) return;
+                const code = editor.getValue();
+                const zip = new JSZip();
+                zip.file("index.html", code);
+                zip.generateAsync({type:"blob"}).then(function(content) {
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(content);
+                    link.download = "ai-generated-site.zip";
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    logToConsole('Project exported as a .zip file.', 'success');
+                });
+            });
+
+            document.getElementById('open-new-tab-btn').addEventListener('click', () => {
+                if (!editor) return;
+                const code = editor.getValue();
+                const blob = new Blob([code], { type: 'text/html' });
+                const url = URL.createObjectURL(blob);
+                window.open(url, '_blank');
+                logToConsole('Preview opened in a new tab.', 'info');
+            });
+
+            // --- Panel Toggling ---
+            document.getElementById('toggle-terminal').addEventListener('click', (e) => {
+                const content = document.getElementById('terminal-content');
+                content.classList.toggle('hidden');
+                e.target.textContent = content.classList.contains('hidden') ? '▲' : '▼';
+            });
+            document.getElementById('toggle-console').addEventListener('click', (e) => {
+                const content = document.getElementById('console-content');
+                content.classList.toggle('hidden');
+                e.target.textContent = content.classList.contains('hidden') ? '▲' : '▼';
+            });
+
+            // --- Terminal Commands ---
+            const commandHistory = [];
+            let historyIndex = -1;
+            terminalInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    const command = terminalInput.value.trim();
+                    logToTerminal(`user@ai-ide:~$ ${command}`);
+                    handleCommand(command);
+                    if (command) {
+                        commandHistory.push(command);
+                        historyIndex = commandHistory.length;
+                    }
+                    terminalInput.value = '';
+                } else if (e.key === 'ArrowUp') {
+                    if (historyIndex > 0) {
+                        historyIndex--;
+                        terminalInput.value = commandHistory[historyIndex];
+                    }
+                } else if (e.key === 'ArrowDown') {
+                     if (historyIndex < commandHistory.length - 1) {
+                        historyIndex++;
+                        terminalInput.value = commandHistory[historyIndex];
+                    } else {
+                        historyIndex = commandHistory.length;
+                        terminalInput.value = '';
+                    }
+                }
+            });
+
+            function handleCommand(command) {
+                const [cmd, ...args] = command.split(' ');
+                switch(cmd) {
+                    case 'help':
+                        logToTerminal('Available commands: generate, clear, export, help, theme [light|dark]');
+                        break;
+                    case 'generate':
+                        logToTerminal('Triggering generation from prompt...');
+                        generateBtn.click();
+                        break;
+                    case 'clear':
+                        terminalOutput.innerHTML = '';
+                        consoleContent.innerHTML = '';
+                        break;
+                    case 'export':
+                        logToTerminal('Triggering export...');
+                        document.getElementById('export-zip-btn').click();
+                        break;
+                    case 'theme':
+                        if (args[0] === 'dark' || args[0] === 'light') {
+                            if (!document.body.classList.contains(args[0])) {
+                                themeToggle.click();
+                            }
+                            logToTerminal(`Theme set to ${args[0]}`);
+                        } else {
+                            logToTerminal('Usage: theme [light|dark]');
+                        }
+                        break;
+                    case '':
+                        break;
+                    default:
+                        logToTerminal(`command not found: ${cmd}`);
+                }
+            }
+        });
+    </script>
+</body>
+</html>
